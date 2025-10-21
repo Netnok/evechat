@@ -1,93 +1,128 @@
 // ==UserScript==
-// @name         EveChat Mobile Input Mirror
+// @name         EveChat Mirror Stable
 // @namespace    https://www.eve-chat.com/
-// @version      1.3
-// @description  Reduce input lag on EveChat mobile by using a mirror textarea and batching updates
-// @author       사용자님
+// @version      2.0
+// @description  Smart input mirroring for EveChat: monitors textarea activation, feedback lock, and conditional mirroring.
 // @match        https://www.eve-chat.com/*
 // @run-at       document-end
 // @grant        none
 // ==/UserScript==
 
-(function () {
+(function() {
   'use strict';
+  console.groupCollapsed('%c[EveChatMirror] 초기화', 'color:#06f;font-weight:bold;');
 
-  if (window.__EVECHAT_MIRROR_ACTIVE__) return;
-  window.__EVECHAT_MIRROR_ACTIVE__ = true;
+  const inputSelector = 'textarea[placeholder*="메세지를 입력해주세요"]';
+  const sendSelector = 'button[title*="전송"], button svg.lucide-send';
+  let input = null, sendBtn = null, mirror = null, buffer = '', isMirrorActive = false;
 
-  const inputSelector = 'div.chat-input[contenteditable="true"]';
-  const sendSelector = 'button.send-btn';
-  let mirror = null, input = null, sendBtn = null, buffer = '';
-
-  /** Utility: delay helper **/
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  /** Create the overlay mirror textarea **/
-  function createMirror(target) {
-    if (document.getElementById('evechat-mirror')) return document.getElementById('evechat-mirror');
+  /** ✅ mirror textarea 생성 **/
+  function createMirror(base) {
+    if (mirror) return mirror;
 
-    const rect = target.getBoundingClientRect();
     const ta = document.createElement('textarea');
     ta.id = 'evechat-mirror';
+    ta.placeholder = 'EveChat Mirror (입력 후 전송버튼 클릭)';
     ta.style.position = 'fixed';
-    ta.style.left = `${rect.left + window.scrollX}px`;
-    ta.style.top = `${rect.top + window.scrollY}px`;
-    ta.style.width = `${rect.width}px`;
-    ta.style.height = `${rect.height}px`;
-    ta.style.zIndex = '999999';
-    ta.style.fontSize = window.getComputedStyle(target).fontSize;
-    ta.style.color = '#000';
-    ta.style.background = '#fff';
-    ta.style.border = '1px solid #ccc';
-    ta.style.borderRadius = '6px';
-    ta.style.boxSizing = 'border-box';
-    ta.style.padding = window.getComputedStyle(target).padding;
+    ta.style.bottom = '10px';
+    ta.style.left = '10px';
+    ta.style.width = 'calc(100% - 20px)';
+    ta.style.height = '70px';
+    ta.style.zIndex = 99999;
+    ta.style.background = 'rgba(0,0,0,0.75)';
+    ta.style.color = 'white';
+    ta.style.border = '1px solid #ff66cc';
+    ta.style.borderRadius = '10px';
+    ta.style.padding = '10px';
+    ta.style.fontSize = '14px';
     ta.style.resize = 'none';
     ta.style.opacity = '0.9';
-    ta.style.lineHeight = window.getComputedStyle(target).lineHeight;
-    ta.autocorrect = 'off';
-    ta.autocomplete = 'off';
+    ta.style.boxShadow = '0 0 10px rgba(255,105,180,0.3)';
     ta.spellcheck = false;
     document.body.appendChild(ta);
 
-    target.style.opacity = '0.3';
-    target.setAttribute('data-mirror-disabled', 'true');
+    ta.addEventListener('input', () => {
+      buffer = ta.value;
+      console.log('[EveChatMirror] mirror 입력:', buffer);
+    });
+
+    mirror = ta;
     return ta;
   }
 
-  /** Send routine **/
+  /** ✅ 전송 수행 **/
   function sendText() {
-    if (!buffer.trim()) return;
-    input.textContent = buffer;
+    if (!input || !buffer.trim()) {
+      console.warn('[EveChatMirror] 전송불가: 입력창이 없거나 buffer가 비어있음.');
+      return;
+    }
+    input.value = buffer;
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    console.log('[EveChatMirror] 실제 입력창에 내용 주입 완료:', buffer);
+
+    // 비활성 버튼 예외 처리
+    if (sendBtn && !sendBtn.disabled) {
+      sendBtn.click();
+      console.log('[EveChatMirror] 버튼 클릭 이벤트 전송');
+    } else {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      console.log('[EveChatMirror] Enter 키 이벤트 전송 (대체 경로)');
+    }
+
     buffer = '';
     mirror.value = '';
   }
 
-  /** Main setup loop **/
-  async function setup() {
-    while (!document.querySelector(inputSelector) || !document.querySelector(sendSelector)) {
+  /** ✅ 상태 감시 루프 **/
+  async function monitorState() {
+    while (true) {
       await sleep(500);
+      const newInput = document.querySelector(inputSelector);
+      const newBtn = document.querySelector(sendSelector)?.closest('button');
+      input = newInput;
+      sendBtn = newBtn;
+
+      if (!input) {
+        console.warn('[EveChatMirror] 입력창 탐색 실패 (페이지 로딩 중이거나 비활성).');
+        continue;
+      }
+
+      const active = !input.disabled && !sendBtn?.disabled;
+      const classInfo = input.className.slice(0, 80) + (input.className.length > 80 ? '...' : '');
+      console.log(`[EveChatMirror] 감시: 활성=${active}, input.class=${classInfo}`);
+
+      // 입력창 활성화 → 미러링 시작
+      if (active && !isMirrorActive) {
+        createMirror(input);
+        isMirrorActive = true;
+        console.log('%c[EveChatMirror] ✅ 입력창 활성화 감지 → 미러링 시작', 'color:lime');
+      }
+
+      // 입력창 비활성화 → 미러링 일시중지
+      if (!active && isMirrorActive) {
+        isMirrorActive = false;
+        if (mirror) mirror.value = '';
+        console.log('%c[EveChatMirror] ⛔ 입력창 비활성화 감지 → 미러링 중단', 'color:orange');
+      }
+
+      // 전송 버튼 감시 (활성 상태에서만)
+      if (sendBtn && isMirrorActive) {
+        sendBtn.removeEventListener('click', sendText);
+        sendBtn.addEventListener('click', sendText);
+      }
     }
-
-    input = document.querySelector(inputSelector);
-    sendBtn = document.querySelector(sendSelector);
-    mirror = createMirror(input);
-
-    mirror.addEventListener('input', () => { buffer = mirror.value; });
-
-    // 버튼 이벤트 후킹
-    const triggerSend = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      sendText();
-    };
-    sendBtn.addEventListener('click', triggerSend, true);
-    sendBtn.addEventListener('touchstart', triggerSend, true);
-
-    console.log('[EveChat Mirror] initialized.');
   }
 
-  setup();
+  /** ✅ 초기 대기 및 시작 **/
+  async function init() {
+    console.log('[EveChatMirror] DOM 탐색 중...');
+    while (!document.querySelector(inputSelector)) await sleep(500);
+    console.log('[EveChatMirror] 입력창 탐색 성공.');
+    monitorState();
+    console.groupEnd();
+  }
+
+  init();
 })();
