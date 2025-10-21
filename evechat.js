@@ -109,6 +109,7 @@
       transition: 'none',
     });
 
+    mirror.style.paddingRight = '12px'
     // IME 대응: input/composition 로깅
     mirror.addEventListener('compositionstart', () => L.info('composition start'));
     mirror.addEventListener('compositionend',   () => L.info('composition end ->', `"${mirror.value}"`));
