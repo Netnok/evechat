@@ -1,128 +1,123 @@
 // ==UserScript==
-// @name         EveChat Mirror Stable
-// @namespace    https://www.eve-chat.com/
-// @version      2.0
-// @description  Smart input mirroring for EveChat: monitors textarea activation, feedback lock, and conditional mirroring.
-// @match        https://www.eve-chat.com/*
-// @run-at       document-end
+// @name         EveChat Mirror Overlay (Final Absolute Sync Version)
+// @namespace    http://tampermonkey.net/
+// @version      2025.10.22
+// @description  완전 렉 제거용 EveChat 미러 입력창 (원본 비활성화 금지, 크기 및 스타일 자동 동기화)
+// @match        https://www.eve-chat.com/chat*
 // @grant        none
 // ==/UserScript==
 
-(function() {
+(function () {
   'use strict';
-  console.groupCollapsed('%c[EveChatMirror] 초기화', 'color:#06f;font-weight:bold;');
-
-  const inputSelector = 'textarea[placeholder*="메세지를 입력해주세요"]';
-  const sendSelector = 'button[title*="전송"], button svg.lucide-send';
-  let input = null, sendBtn = null, mirror = null, buffer = '', isMirrorActive = false;
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  /** ✅ mirror textarea 생성 **/
-  function createMirror(base) {
-    if (mirror) return mirror;
+  console.log('%c[EveChatMirror] Script loaded. Waiting for textarea...', 'color:#ff69b4;');
 
-    const ta = document.createElement('textarea');
-    ta.id = 'evechat-mirror';
-    ta.placeholder = 'EveChat Mirror (입력 후 전송버튼 클릭)';
-    ta.style.position = 'fixed';
-    ta.style.bottom = '10px';
-    ta.style.left = '10px';
-    ta.style.width = 'calc(100% - 20px)';
-    ta.style.height = '70px';
-    ta.style.zIndex = 99999;
-    ta.style.background = 'rgba(0,0,0,0.75)';
-    ta.style.color = 'white';
-    ta.style.border = '1px solid #ff66cc';
-    ta.style.borderRadius = '10px';
-    ta.style.padding = '10px';
-    ta.style.fontSize = '14px';
-    ta.style.resize = 'none';
-    ta.style.opacity = '0.9';
-    ta.style.boxShadow = '0 0 10px rgba(255,105,180,0.3)';
-    ta.spellcheck = false;
-    document.body.appendChild(ta);
-
-    ta.addEventListener('input', () => {
-      buffer = ta.value;
-      console.log('[EveChatMirror] mirror 입력:', buffer);
-    });
-
-    mirror = ta;
-    return ta;
+  async function waitForTextarea() {
+    for (let i = 0; i < 60; i++) {
+      const el = document.querySelector('textarea[placeholder*="메세지를 입력해주세요"]');
+      if (el) return el;
+      await sleep(500);
+    }
+    return null;
   }
 
-  /** ✅ 전송 수행 **/
-  function sendText() {
-    if (!input || !buffer.trim()) {
-      console.warn('[EveChatMirror] 전송불가: 입력창이 없거나 buffer가 비어있음.');
+  async function waitForSendButton() {
+    for (let i = 0; i < 60; i++) {
+      const btn = document.querySelector('button[title*="전송"], button svg.lucide-send');
+      if (btn) return btn.closest('button') || btn;
+      await sleep(500);
+    }
+    return null;
+  }
+
+  async function initMirror() {
+    const input = await waitForTextarea();
+    const sendBtn = await waitForSendButton();
+
+    if (!input || !sendBtn) {
+      console.error('[EveChatMirror] ❌ input or send button not found.');
       return;
     }
-    input.value = buffer;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    console.log('[EveChatMirror] 실제 입력창에 내용 주입 완료:', buffer);
 
-    // 비활성 버튼 예외 처리
-    if (sendBtn && !sendBtn.disabled) {
-      sendBtn.click();
-      console.log('[EveChatMirror] 버튼 클릭 이벤트 전송');
-    } else {
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      console.log('[EveChatMirror] Enter 키 이벤트 전송 (대체 경로)');
+    console.log('%c[EveChatMirror] ✅ Textarea found. Initializing mirror...', 'color:limegreen;');
+
+    // --- 미러 생성 ---
+    const mirror = document.createElement('textarea');
+    mirror.id = 'mirrorInput';
+    mirror.placeholder = input.placeholder;
+    mirror.autocapitalize = input.autocapitalize;
+    mirror.autocorrect = input.autocorrect;
+    mirror.spellcheck = input.spellcheck;
+    mirror.rows = input.rows || 1;
+    mirror.style.position = 'absolute';
+    mirror.style.zIndex = '99999';
+    mirror.style.resize = 'none';
+    mirror.style.overflowY = 'auto';
+    mirror.style.boxSizing = 'border-box';
+    mirror.style.transition = 'none';
+    mirror.style.border = 'none';
+    mirror.style.outline = 'none';
+    mirror.style.background = 'transparent'; // 배경은 초기 투명, 이후 동기화
+    mirror.style.color = 'inherit';
+    mirror.style.pointerEvents = 'auto';
+
+    document.body.appendChild(mirror);
+
+    // --- 원본과 스타일/위치/크기 동기화 ---
+    const syncStyle = () => {
+      const rect = input.getBoundingClientRect();
+      const cs = getComputedStyle(input);
+
+      mirror.style.top = `${rect.top + window.scrollY}px`;
+      mirror.style.left = `${rect.left + window.scrollX}px`;
+      mirror.style.width = `${rect.width}px`;
+      mirror.style.height = `${rect.height}px`;
+
+      mirror.style.fontSize = cs.fontSize;
+      mirror.style.fontFamily = cs.fontFamily;
+      mirror.style.lineHeight = cs.lineHeight;
+      mirror.style.padding = cs.padding;
+      mirror.style.borderRadius = cs.borderRadius;
+      mirror.style.background = cs.background;
+      mirror.style.color = cs.color;
+      mirror.style.boxShadow = cs.boxShadow || 'none';
+    };
+
+    syncStyle();
+
+    new ResizeObserver(syncStyle).observe(input);
+    new MutationObserver(syncStyle).observe(input, { attributes: true, attributeFilter: ['style', 'class'] });
+    window.addEventListener('scroll', syncStyle, true);
+    window.addEventListener('resize', syncStyle, true);
+
+    // --- 입력 이벤트 전달 ---
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+    mirror.addEventListener('input', () => {
+      setter.call(input, mirror.value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // --- 전송 버튼 클릭 시 ---
+    sendBtn.addEventListener('click', () => {
+      mirror.value = '';
+      setter.call(input, '');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    console.log('%c[EveChatMirror] Mirror active and fully synced with textarea.', 'color:cyan;');
+  }
+
+  // --- React-safe 렌더 감시 ---
+  const root = document.querySelector('#__next');
+  const obs = new MutationObserver(async () => {
+    const ta = document.querySelector('textarea[placeholder*="메세지를 입력해주세요"]');
+    if (ta && !document.querySelector('#mirrorInput')) {
+      obs.disconnect();
+      await sleep(800); // 렌더 안정화 대기
+      await initMirror();
     }
-
-    buffer = '';
-    mirror.value = '';
-  }
-
-  /** ✅ 상태 감시 루프 **/
-  async function monitorState() {
-    while (true) {
-      await sleep(500);
-      const newInput = document.querySelector(inputSelector);
-      const newBtn = document.querySelector(sendSelector)?.closest('button');
-      input = newInput;
-      sendBtn = newBtn;
-
-      if (!input) {
-        console.warn('[EveChatMirror] 입력창 탐색 실패 (페이지 로딩 중이거나 비활성).');
-        continue;
-      }
-
-      const active = !input.disabled && !sendBtn?.disabled;
-      const classInfo = input.className.slice(0, 80) + (input.className.length > 80 ? '...' : '');
-      console.log(`[EveChatMirror] 감시: 활성=${active}, input.class=${classInfo}`);
-
-      // 입력창 활성화 → 미러링 시작
-      if (active && !isMirrorActive) {
-        createMirror(input);
-        isMirrorActive = true;
-        console.log('%c[EveChatMirror] ✅ 입력창 활성화 감지 → 미러링 시작', 'color:lime');
-      }
-
-      // 입력창 비활성화 → 미러링 일시중지
-      if (!active && isMirrorActive) {
-        isMirrorActive = false;
-        if (mirror) mirror.value = '';
-        console.log('%c[EveChatMirror] ⛔ 입력창 비활성화 감지 → 미러링 중단', 'color:orange');
-      }
-
-      // 전송 버튼 감시 (활성 상태에서만)
-      if (sendBtn && isMirrorActive) {
-        sendBtn.removeEventListener('click', sendText);
-        sendBtn.addEventListener('click', sendText);
-      }
-    }
-  }
-
-  /** ✅ 초기 대기 및 시작 **/
-  async function init() {
-    console.log('[EveChatMirror] DOM 탐색 중...');
-    while (!document.querySelector(inputSelector)) await sleep(500);
-    console.log('[EveChatMirror] 입력창 탐색 성공.');
-    monitorState();
-    console.groupEnd();
-  }
-
-  init();
+  });
+  obs.observe(root || document, { childList: true, subtree: true });
 })();
